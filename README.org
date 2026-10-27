@@ -1,0 +1,171 @@
+#+TITLE: gitlab-org.el — GitLab issues in org-mode
+
+Browse GitLab projects and issues from Emacs, keep issues as org-mode tasks,
+read an issue with its comments as an org buffer, and submit org-clock time
+to GitLab time tracking — without leaving your editor.
+
+Works with gitlab.com and self-hosted instances.  All requests go through the
+official [[https://gitlab.com/gitlab-org/cli][glab]] CLI, so there is no token to configure in Emacs.
+
+* Features
+
+- *Browse projects & issues* — search your projects, filter issues (open /
+  assigned to me / closed / by label / text search)
+- *Issues as org tasks* — a selected issue becomes an org heading with a
+  =GITLAB_ISSUE= property (=group/project#123=)
+- *Bulk copy* — all your open issues, or a filtered project's issues, as org
+  subtrees ready to paste
+- *Read issues in Emacs* — description and comments rendered as a read-only
+  org buffer (Markdown converted with pandoc)
+- *Submit time from org-clock* — pick a clock entry, it is logged with its
+  date and a summary via GitLab's GraphQL =timelogCreate=
+- *Duplicate detection* — warns if you already logged time on the same issue
+  and day
+- *No token handling* — reuses the login of =glab= (OS keyring or its config)
+- *Literate source* — all code lives in =gitlab-org.org=, tangled to =gitlab-org.el=
+
+For merge requests, pipelines and job logs, pair it with [[https://github.com/isamert/lab.el][lab.el]] (see
+[[*Using with lab.el][below]]).
+
+* Requirements
+
+- Emacs 28.1+ with native JSON support (the default build)
+- =org-mode= (built-in)
+- [[https://gitlab.com/gitlab-org/cli][glab]], logged in to your GitLab instance
+- [[https://pandoc.org][pandoc]] (optional) — converts issue Markdown to org in the issue view;
+  without it the Markdown is shown as-is
+
+* Installation
+
+** 1. Clone the repository
+
+#+begin_example
+git clone https://github.com/avkoval/emacs-org-mode-gitlab ~/.emacs.d/gitlab
+#+end_example
+
+** 2. Log in with glab
+
+Create a personal access token in GitLab (/Preferences → Access tokens/) with
+the =api= scope — =read_api= is enough if you will not submit time — and log in:
+
+#+begin_example
+glab auth login --hostname gitlab.example.com
+glab auth status
+#+end_example
+
+** 3. Configure Emacs
+
+#+begin_src emacs-lisp
+(load "~/.emacs.d/gitlab/gitlab-org.el")
+
+;; Hostname without scheme; must be a host glab is logged in to
+(setq gitlab-org-host "gitlab.example.com")
+
+;; Keybindings (adjust to your preference)
+(global-set-key (kbd "C-x / g i") #'gitlab-org-insert-task)
+(global-set-key (kbd "C-x / g I") #'gitlab-org-insert-my-task)
+(global-set-key (kbd "C-x / g v") #'gitlab-org-view-issue)
+(global-set-key (kbd "C-x / g o") #'gitlab-org-open-issue)
+(global-set-key (kbd "C-x / g s") #'gitlab-org-submit-clock-entry)
+(global-set-key (kbd "C-x / g y") #'gitlab-org-yank-my-issues)
+#+end_src
+
+** 4. Tangle (if you modify =gitlab-org.org=)
+
+If you edit the literate source, re-tangle with =C-c C-v t= in
+=gitlab-org.org= to regenerate =gitlab-org.el=.
+
+* Usage
+
+** Insert an issue as an org task
+
+1. =M-x gitlab-org-insert-task=
+2. Type a search query to find your project (empty lists the most recently active)
+3. Select the project
+4. Choose a filter (open / assigned to me / closed / by label / search)
+5. Select an issue
+6. The task is placed in the kill ring — press =C-c C-x C-y=
+   (=org-paste-subtree=) to insert it at the correct heading level
+
+The inserted heading looks like:
+
+#+begin_example
+ ** TODO Issue title here
+ :PROPERTIES:
+ :GITLAB_ISSUE: mygroup/myproject#42
+ :END:
+#+end_example
+
+=M-x gitlab-org-insert-my-task= skips the project step and offers your open
+issues across all projects.
+
+** Copy many issues at once
+
+- =M-x gitlab-org-yank-my-issues= — all your open issues
+- =M-x gitlab-org-yank-project-issues= — a project's issues, filtered as above
+
+Both copy the issues as org subtrees in the format above; paste with
+=C-c C-x C-y=.  With a prefix argument (=C-u=) they are copied as a plain
+=- = list instead, one line per issue.
+
+** Read an issue
+
+=M-x gitlab-org-view-issue= shows the issue — state, assignees, labels,
+milestone, due date, time spent — with its description and comments in a
+read-only org buffer.  =M-x gitlab-org-open-issue= opens it in the browser.
+
+Both take the issue from the =GITLAB_ISSUE= property of the current org
+heading (inherited from parents), from the issue buffer you are in, or ask
+for it, offering a reference at point (=group/project#42=) as the default.
+
+** Submit org-clock time to GitLab
+
+1. Clock in/out on a heading that has a =GITLAB_ISSUE= property
+2. With point on that heading, =M-x gitlab-org-submit-clock-entry=
+3. Pick the clock entry (most recent first) if there are several
+4. If you already logged time on this issue that day, you'll see a summary
+   and a confirmation prompt
+5. Edit the summary (defaults to the heading text)
+6. The time is logged on GitLab, dated with the clock entry's start time
+
+To be asked automatically on every clock-out from such a heading:
+=M-x gitlab-org-enable-clock-out-hook= (and =gitlab-org-disable-clock-out-hook=).
+
+** API exploration
+
+The "API exploration" section of =gitlab-org.org= has =sh= blocks that call
+the REST and GraphQL endpoints with =glab api=, using ~gitlab-org-host~.
+Run them with =C-c C-c=.
+
+* Using with lab.el
+
+[[https://github.com/isamert/lab.el][lab.el]] covers merge requests, pipelines, job logs and todos.  It reads its
+token from ~lab-token~ or auth-source; ~gitlab-org-glab-token~ lets it reuse
+glab's login instead:
+
+#+begin_src emacs-lisp
+(use-package lab
+  :bind (("C-x / g m" . lab-list-my-merge-requests)
+         ("C-x / g r" . lab-list-review-merge-requests)
+         ("C-x / g p" . lab-search-project))
+  :config
+  (setq lab-host (concat "https://" gitlab-org-host))
+  (unless lab-token
+    (setq lab-token (gitlab-org-glab-token))))
+#+end_src
+
+* How it works
+
+| Component             | Description                                                  |
+|-----------------------+--------------------------------------------------------------|
+| =glab api=            | All REST and GraphQL calls, authenticated by glab            |
+| REST =/api/v4=        | Projects, issues, labels, comments (paginated)               |
+| GraphQL               | Time logs: =timelogs= for duplicates, =timelogCreate=        |
+| =completing-read=     | Project/filter/issue selection (works with helm/vertico)     |
+| =org-paste-subtree=   | Inserts tasks at the correct heading level                   |
+| =org-clock= parsing   | Reads CLOCK lines to get the time to submit                  |
+| pandoc                | Markdown → org in the issue view                             |
+
+* License
+
+MIT — see [[file:LICENSE][LICENSE]].
